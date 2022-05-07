@@ -19,7 +19,6 @@ localUsername = getpass.getuser()
 # Generates new RSA public and private keys.
 publicKey, privateKey = rsa.newkeys(2048)
 
-
 # Method to send the data.
 def sendData(sock, passedJsonData):
     # Tries to send packet to recipient.
@@ -73,7 +72,7 @@ def receiveData(sock, expectedPacketType):
     if packetType == "recipient_public_key":
         global recipientKey
         recipientKey = rsa.PublicKey.load_pkcs1(x.get("content").encode())
-
+        print(recipientKey)
     # Gets the username of the recipient.
     elif packetType == "recipient_username":
         recipientUsername = x.get("content")

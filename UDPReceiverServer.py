@@ -1,3 +1,4 @@
+import base64
 import json
 import socket
 import zlib
@@ -45,11 +46,8 @@ def sendData(sock, jsonData):
     # Dumps the packet to be sent into a json object.
     jsonData = json.dumps(jsonData)
 
-    # Sets global client variable.
-    global client
-
     # Tries to send the json data to the recipient.
-    sock.sendto(jsonData.encode(), client)
+    sock.sendto(jsonData.encode(), clientAddress)
 
     try:
         # When a packet is sent, an ACK packet should be returned to confirm it arrived.
@@ -83,6 +81,7 @@ def receiveData(sock, expectedPacketType):
     jsonData, address = sock.recvfrom(BUFFER_SIZE)
 
     # Setting the client address.
+    global clientAddress
     clientAddress = address
 
     # Loads the received packet into a json object.
@@ -110,7 +109,7 @@ def receiveData(sock, expectedPacketType):
 
     if packetType == "sync":
         # Initiating connection with client.
-        print("Connection initialized with: " + clientAddress + ".")
+        print("Connection initialized with: ", clientAddress , ".")
 
     elif packetType == "sender_public_key":
         # Getting the public key received from client.
@@ -121,6 +120,7 @@ def receiveData(sock, expectedPacketType):
 
     elif packetType == "message":
         # Decrypts message received.
+
         uncensoredMessage = rsa.decrypt(x.get("content").encode('latin-1'), privateKey).decode()
         censoredMessage = profanity.censor(uncensoredMessage)
         print(censoredMessage)
@@ -196,7 +196,9 @@ while True:
 
     # Sends username.
     # RSA algorithm encrypts with latin-1 encoding.
-    encryptedUsername = rsa.encrypt(localUsername.encode(), senderKey).decode('latin-1')
+    encryptedUsername = rsa.encrypt(localUsername.encode(), senderKey)
+    encryptedUsername = base64.b64encode(encryptedUsername)
+    encryptedUsername = str(encryptedUsername, "latin-1")
 
     # Assigns json objects to be sent.
     packetToSend = {"type": "recipient_username", "content": encryptedUsername}
@@ -218,10 +220,13 @@ while True:
     message = "\n\nThank you for your message!\n\n"
 
     # Encrypts message to be sent.
-    message = rsa.encrypt(message.encode(), senderKey).decode('latin-1')
+
+    message = rsa.encrypt(message.encode(), senderKey)
+    encryptedMessage = base64.b64encode(encryptedMessage)
+    encryptedMessage = str(encryptedMessage, "latin-1")
 
     # Assigns json objects to be sent.
-    packetToSend = {"type": "message", "content": message}
+    packetToSend = {"type": "message", "content": encryptedMessage}
 
     # noinspection PyBroadException
     try:
@@ -234,5 +239,6 @@ while True:
     try:
         receiveData(serverSocket, "fin")
     except Exception:
+        serverSocket.close()
         print("Closed connection with Client.")
         continue
