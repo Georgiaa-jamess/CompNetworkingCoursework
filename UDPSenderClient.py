@@ -1,63 +1,9 @@
-<<<<<<< HEAD
-import json
-import socket
-import zlib
-
-import rsa
-
-# Sets size for the buffer.
-from better_profanity import profanity
-
-BUFFER_SIZE = 4096
-
-
-# Uses CRC32 to calculate a checksum for our data to be sent.
-# Takes json data in to compare the checksum with the calculated checksum.
-# The checksum is performed on the type and content of the json.
-def checksum_calculator(jsonData):
-
-    # Fetches type and content from the jsonData passed.
-    name = jsonData.get("type")
-    content = jsonData.get("content")
-
-    # Sets default if name or content is none.
-    if name is None:
-        name = ""
-    if content is None:
-        content = ""
-
-    # Forms checksum sequence.
-    checksum_sequence = name + content
-    checksum = zlib.crc32(bytes(checksum_sequence, "utf-8"))
-
-    return checksum
-
-
-# Method to send the data.
-def sendData(sock, jsonData):
-
-    # Calculates checksum.
-    checksumVal = checksum_calculator(jsonData)
-
-    # Appends checksum to the Json data.
-    jsonData['checksum'] = checksumVal
-    print(jsonData)
-
-    # Dumps the packet to be sent into a json object.
-    jsonData = json.dumps(jsonData)
-
-    # Sets global client variable.
-    global client
-
-    # Tries to send the json data to the recipient.
-    sock.sendto(jsonData.encode(), client)
-=======
+import base64
 import socket
 import getpass
 import json
 import rsa
 import datetime
-import re
 
 
 # Sets size for the buffer.
@@ -78,7 +24,6 @@ publicKey, privateKey = rsa.newkeys(2048)
 def sendData(sock, passedJsonData):
     # Tries to send packet to recipient.
     sock.sendto(passedJsonData.encode(), UDP_ADDRESS)
->>>>>>> 81ffe81 (Initial Commit)
 
     try:
         # When a packet is sent, an ACK packet should be returned to confirm it arrived.
@@ -108,32 +53,11 @@ def sendData(sock, passedJsonData):
 # Method to receive data.
 def receiveData(sock, expectedPacketType):
 
-<<<<<<< HEAD
-    # Tries to receive data from recipient
-    jsonData, address = sock.recvfrom(BUFFER_SIZE)
-
-    # Setting the client address.
-    clientAddress = address
-
-    # Loads the received packet into a json object.
-    x = json.loads(jsonData)
-
-    # Checks if the received packet has a checksum.
-    if x.get("checksum") is not None:
-
-        # If checksums do not match, an exception will be raised, informs user of outcome.
-        if checksum_calculator(x) != int(x.get("checksum")):
-            print("Checksums do NOT match, packet needs to be sent again.")
-            raise Exception()
-        else:
-            print("Checksums match.")
-=======
     # Tries to receive data from recipient.
     packet, server = sock.recvfrom(4096)
 
     # Loads the received packet into a json object.
     x = json.loads(packet)
->>>>>>> 81ffe81 (Initial Commit)
 
     # Gets the type of the packet.
     packetType = x.get("type")
@@ -145,136 +69,6 @@ def receiveData(sock, expectedPacketType):
         print("Incorrect packet type received.")
         raise Exception()
 
-<<<<<<< HEAD
-    if packetType == "sync":
-        # Initiating connection with client.
-        print("Connection initialized with: " + clientAddress + ".")
-
-    elif packetType == "sender_public_key":
-        # Getting the public key received from client.
-
-        global senderKey
-        senderKey = rsa.PublicKey.load_pkcs1(x.get("content").encode())
-
-    elif packetType == "message":
-        # Decrypts message received.
-        uncensoredMessage = rsa.decrypt(x.get("content").encode('latin-1'), privateKey).decode()
-        censoredMessage = profanity.censor(uncensoredMessage)
-        print(censoredMessage)
-
-    elif packetType == "fin":
-        # Terminating connection with client.
-        print("Terminating connection.")
-
-    # Sends back an ACK packet to confirm packet was received.
-    ackJsonData = {"type": "ack"}
-
-    # Dumps the packet to be sent into a json object.
-    ackJsonData = json.dumps(ackJsonData)
-
-    # Sends packet to client.
-    sock.sendto(ackJsonData.encode(), clientAddress)
-
-
-localUsername = "GeoJames"
-
-# Sets global sender key variable.
-global senderKey
-
-# Generates a new RSA public and private key.
-publicKey, privateKey = rsa.newkeys(2048)
-
-# Setting up socket connection.
-serverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-# Sets IP and Port.
-serverSocket.bind(('127.0.0.1', 12000))
-
-# Client that's sending messages currently.
-global client
-
-print("Started receiver server.")
-
-while True:
-
-    # Client initialised to be set to null.
-    client = ()
-
-    # noinspection PyBroadException
-    try:
-        receiveData(serverSocket, "sync")
-    except Exception:
-        continue
-
-    # Receiving public key for encryption.
-    # noinspection PyBroadException
-    try:
-        receiveData(serverSocket, "sender_public_key")
-    except Exception:
-        continue
-
-    # Sending UDPReceiverServer encryption public key in PEM format as bytes.
-    publicKeyAsPackets = publicKey.save_pkcs1().decode()
-
-    # Assigns json objects to be sent.
-    packetToSend = {"type": "recipient_public_key", "content": publicKeyAsPackets}
-
-    # noinspection PyBroadException
-    try:
-        sendData(serverSocket, packetToSend)
-    except Exception:
-        continue
-
-    # Username was requested.
-    # noinspection PyBroadException
-    try:
-        receiveData(serverSocket, "request_username")
-    except Exception:
-        continue
-
-    # Sends username.
-    # RSA algorithm encrypts with latin-1 encoding.
-    encryptedUsername = rsa.encrypt(localUsername.encode(), senderKey).decode('latin-1')
-
-    # Assigns json objects to be sent.
-    packetToSend = {"type": "recipient_username", "content": encryptedUsername}
-
-    # noinspection PyBroadException
-    try:
-        sendData(serverSocket, packetToSend)
-    except Exception:
-        continue
-
-    # Received message.
-    # noinspection PyBroadException
-    try:
-        receiveData(serverSocket, "message")
-    except Exception:
-        continue
-
-    # Sending custom message.
-    message = "\n\nThank you for your message!\n\n"
-
-    # Encrypts message to be sent.
-    message = rsa.encrypt(message.encode(), senderKey).decode('latin-1')
-
-    # Assigns json objects to be sent.
-    packetToSend = {"type": "message", "content": message}
-
-    # noinspection PyBroadException
-    try:
-        sendData(serverSocket, packetToSend)
-    except Exception:
-        continue
-
-    # Ending communication with server.
-    # noinspection PyBroadException
-    try:
-        receiveData(serverSocket, "fin")
-    except Exception:
-        print("Closed connection with Client.")
-        continue
-=======
     # Gets the public key received from recipient.
     if packetType == "recipient_public_key":
         global recipientKey
@@ -282,12 +76,15 @@ while True:
 
     # Gets the username of the recipient.
     elif packetType == "recipient_username":
-        global recipientUsername
-        recipientUsername = rsa.decrypt(x.get("content").encode('latin-1'), privateKey).decode()
+        recipientUsername = x.get("content")
+        decodedUsername = base64.b64decode(recipientUsername)
+        recipientUsername = rsa.decrypt(decodedUsername, privateKey).decode()
 
     # Gets the message sent back.
     elif packetType == "message":
-        print(rsa.decrypt(x.get("content").encode('latin-1'), privateKey).decode())
+        message = x.get("content")
+        decodedMessage = base64.b64decode(message)
+        message = rsa.decrypt(decodedMessage, privateKey).decode()
 
     # Sends back an ACK packet to confirm packet was received.
     ackPacketToSend = {"type": "ack"}
@@ -303,7 +100,7 @@ while True:
 recipientList = ""
 while recipientList == "":
     recipientList = str(input(
-        "Enter list of IP addresses to send greetings to. Use spaces to separate the addresses.\n"))
+        "Enter list of IP addresses to send greetings to using spaces to separate the addresses:\n"))
 
 # Reformat recipient list to print.
 recipientList = recipientList.split(" ")
@@ -321,14 +118,14 @@ for i in range(len(recipientList)):
     UDP_IP_ADDRESS = recipientList[i]
 
     # Regex to validate IP.
-    validIP = re.match(
-        r"^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$",
-        UDP_IP_ADDRESS)
+    #validIP = re.match(
+        #r"^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$",
+        #UDP_IP_ADDRESS)
 
     # If IP is not valid, informs user and moves onto next IP.
-    if not validIP:
-        print("IP " + str(i + 1) + " you entered is not valid")
-        continue
+    #if not validIP:
+        #print("IP " + str(i + 1) + " you entered is not valid")
+       #continue
 
     # Setting port number to be used.
     UDP_PORT_NO = 12000
@@ -572,7 +369,9 @@ for i in range(len(recipientList)):
     print("Sending Message: \n", message + "\n")
 
     # Encrypts message.
-    message = rsa.encrypt(message.encode(), recipientKey).decode('latin-1')
+    message = rsa.encrypt(message.encode(), recipientKey)
+    message = base64.b64encode(message)
+    message = str(message, "latin-1")
 
     # Dumps the packet to be sent into a json object.
     packetToSend = {"type": "message", "content": message}
@@ -705,4 +504,3 @@ for i in range(len(recipientList)):
     print("Terminated connection with recipient - " + str(UDP_IP_ADDRESS) + ".")
 
 print("Finished sending greetings.")
->>>>>>> 81ffe81 (Initial Commit)
