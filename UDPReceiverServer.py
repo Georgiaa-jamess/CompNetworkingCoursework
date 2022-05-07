@@ -116,7 +116,8 @@ def receiveData(sock, expectedPacketType):
         # Getting the public key received from client.
 
         global senderKey
-        senderKey = rsa.PublicKey.load_pkcs1(x.get("content").encode())
+        senderKey = rsa.PublicKey.load_pkcs1(x.get("content"))
+
 
     elif packetType == "message":
         # Decrypts message received.
@@ -165,15 +166,14 @@ while True:
     # noinspection PyBroadException
     try:
         receiveData(serverSocket, "sync")
+    except KeyboardInterrupt:
+        break
     except Exception:
         continue
 
     # Receiving public key for encryption.
     # noinspection PyBroadException
-    try:
-        receiveData(serverSocket, "sender_public_key")
-    except Exception:
-        continue
+    receiveData(serverSocket, "sender_public_key")
 
     # Sending UDPReceiverServer encryption public key in PEM format as bytes.
     publicKeyAsPackets = publicKey.save_pkcs1().decode()

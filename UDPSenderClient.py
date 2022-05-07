@@ -180,7 +180,7 @@ for i in range(len(recipientList)):
 
     except Exception:
         # Cannot send IP to current IP, informs user, closes socket and moves onto next IP.
-        print("Unknown error occurred, moving on to next IP address\n\n")
+        print("Unknown error occurred, moving on to next IP address.\n\n")
         clientSocket.close()
         continue
 
@@ -352,7 +352,7 @@ for i in range(len(recipientList)):
             clientSocket.close()
             continue
 
-    print(recipientUsername)
+    print("Recipient username is: " + recipientUsername)
 
     # Sending the greeting message.
     # Checks time for correct greeting of Good Morning, Good Afternoon or Good Evening
