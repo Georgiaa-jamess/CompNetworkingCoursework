@@ -1,26 +1,47 @@
 import base64
+import os
 import socket
-import getpass
 import json
+import zlib
 import rsa
 import datetime
-
 
 # Sets size for the buffer.
 BUFFER_SIZE = 4096
 
-# Global variables.
-global recipientKey
-global recipientUsername
 
-# Gets username.
-localUsername = getpass.getuser()
+# Uses CRC32 to calculate a checksum for our data to be sent.
+# Takes json data in to compare the checksum with the calculated checksum.
+# The checksum is performed on the type and content of the json.
+def checksum_calculator(passedJsonData):
 
-# Generates new RSA public and private keys.
-publicKey, privateKey = rsa.newkeys(2048)
+    # Fetches type and content from the jsonData passed.
+    name = passedJsonData.get("type")
+    content = passedJsonData.get("content")
+
+    # Sets default if name or content is none.
+    if name is None:
+        name = ""
+    if content is None:
+        content = ""
+
+    # Forms checksum sequence.
+    checksum_sequence = name + content
+    checksum = zlib.crc32(bytes(checksum_sequence, "utf-8"))
+
+    return checksum
+
 
 # Method to send the data.
 def sendData(sock, passedJsonData):
+
+    # Calculates checksum.
+    checksum_value = checksum_calculator(passedJsonData)
+    # Adds to json.
+    passedJsonData['checksum'] = checksum_value
+
+    passedJsonData = json.dumps(passedJsonData)
+
     # Tries to send packet to recipient.
     sock.sendto(passedJsonData.encode(), UDP_ADDRESS)
 
@@ -32,12 +53,23 @@ def sendData(sock, passedJsonData):
         packet, server = sock.recvfrom(BUFFER_SIZE)
 
         # Loads the received packet into a json object.
-        x = json.loads(packet)
+        receivedPacket = json.loads(packet)
 
         # Gets the type of the packet.
-        packetType = x.get("type")
+        packetType = receivedPacket.get("type")
+
+        # Check to seem if checksums match.
+        if receivedPacket.get("checksum") is not None:
+            if checksum_calculator(receivedPacket) != int(receivedPacket.get("checksum")):
+                print("The checksums do NOT match - packet needs to be resent.")
+                raise Exception()
+            else:
+                print("The checksum on ACK matches.")
+
+        print("Packet Type Received:", packetType)
 
         # If the ACK packet has been sent back, the recipient received the data correctly.
+        print(packetType)
         if packetType == "ack":
             print("An ACK packet has been received.")
         else:
@@ -53,13 +85,21 @@ def sendData(sock, passedJsonData):
 def receiveData(sock, expectedPacketType):
 
     # Tries to receive data from recipient.
-    packet, server = sock.recvfrom(4096)
+    packet, server = sock.recvfrom(BUFFER_SIZE)
 
     # Loads the received packet into a json object.
-    x = json.loads(packet)
+    receivedPacket = json.loads(packet)
 
     # Gets the type of the packet.
-    packetType = x.get("type")
+    packetType = receivedPacket.get("type")
+
+    # Check to seem if checksums match.
+    if receivedPacket.get("checksum") is not None:
+        if checksum_calculator(receivedPacket) != int(receivedPacket.get("checksum")):
+            print("The checksums do NOT match - packet needs to be resent.")
+            raise Exception()
+        else:
+            print("The checksum matches.")
 
     print("Packet Type Received: ", packetType)
 
@@ -71,29 +111,43 @@ def receiveData(sock, expectedPacketType):
     # Gets the public key received from recipient.
     if packetType == "recipient_public_key":
         global recipientKey
-        recipientKey = rsa.PublicKey.load_pkcs1(x.get("content").encode())
+        recipientKey = rsa.PublicKey.load_pkcs1(receivedPacket.get("content").encode())
         print(recipientKey)
+
     # Gets the username of the recipient.
     elif packetType == "recipient_username":
-        recipientUsername = x.get("content")
-        decodedUsername = base64.b64decode(recipientUsername)
-        recipientUsername = rsa.decrypt(decodedUsername, privateKey).decode()
+        global recipientName
+        recipientName = receivedPacket.get("content")
+        decodedUsername = base64.b64decode(recipientName)
+        recipientName = rsa.decrypt(decodedUsername, privateKey).decode()
 
     # Gets the message sent back.
-    elif packetType == "message":
-        message = x.get("content")
+    elif packetType == " message":
+        global message
+        message = receivedPacket.get("content")
         decodedMessage = base64.b64decode(message)
         message = rsa.decrypt(decodedMessage, privateKey).decode()
+
+        print("\n\nHere's the message received:\n------\n" + message + "\n-----\n\n")
 
     # Sends back an ACK packet to confirm packet was received.
     ackPacketToSend = {"type": "ack"}
 
-    # Dumps the packet to be sent into a json object.
-    ackJsonData = json.dumps(ackPacketToSend)
+    ackPacketToSend = json.dumps(ackPacketToSend)
 
     # Sends packet to recipient.
-    sock.sendto(ackJsonData.encode(), UDP_ADDRESS)
+    sock.sendto(ackPacketToSend.encode(), UDP_ADDRESS)
 
+
+# Generates new RSA public and private keys.
+publicKey, privateKey = rsa.newkeys(2048)
+
+# Gets username.
+localUser = os.getlogin()
+
+# Defines global variables.
+global recipientKey
+global recipientName
 
 # Gets list of addresses to send greetings to from user.
 recipientList = ""
@@ -108,6 +162,10 @@ print(recipientList)
 # Takes custom message from user.
 customMessage = str(input("Please enter your custom message : "))
 
+# Limits the length of the message.
+while len(customMessage.encode()) > 200:
+    customMessage = str(input("Message can't exceed 200 bytes.\nPlease enter your custom message : "))
+
 # Tries to send greeting to each IP address entered by the user.
 for i in range(len(recipientList)):
 
@@ -117,14 +175,14 @@ for i in range(len(recipientList)):
     UDP_IP_ADDRESS = recipientList[i]
 
     # Regex to validate IP.
-    #validIP = re.match(
-        #r"^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$",
-        #UDP_IP_ADDRESS)
+    # validIP = re.match(
+    # r"^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$",
+    # UDP_IP_ADDRESS)
 
     # If IP is not valid, informs user and moves onto next IP.
-    #if not validIP:
-        #print("IP " + str(i + 1) + " you entered is not valid")
-       #continue
+    # if not validIP:
+    # print("IP " + str(i + 1) + " you entered is not valid")
+    # continue
 
     # Setting port number to be used.
     UDP_PORT_NO = 12000
@@ -136,16 +194,13 @@ for i in range(len(recipientList)):
     clientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     # Synchronizing packet for initiating connection.
-    print("\n\nInitialising connection")
+    print("Initialising connection.")
     packetToSend = {"type": "sync"}
-
-    # Dumps the packet to be sent into a json object.
-    jsonData = json.dumps(packetToSend)
 
     # Tries to send the json data to the address.
     # noinspection PyBroadException
     try:
-        sendData(clientSocket, jsonData)
+        sendData(clientSocket, packetToSend)
 
     except socket.timeout as inst:
         # If the request times out it, another attempt is made to resend the data.
@@ -154,7 +209,7 @@ for i in range(len(recipientList)):
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToSend)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -169,7 +224,7 @@ for i in range(len(recipientList)):
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToSend)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -184,20 +239,17 @@ for i in range(len(recipientList)):
         continue
 
     # Exchange Public keys between sender and receiver.
-    print("Exchanging public keys.")
+    print("Exchanging public keys...")
 
     # Converts the public key into PEM format as bytes and then decodes it to string.
     pubKeyAsPackets = publicKey.save_pkcs1().decode()
 
     packetToSend = {"type": "sender_public_key", "content": pubKeyAsPackets}
 
-    # Loads the packet to be sent into a json object.
-    jsonData = json.dumps(packetToSend)
-
     # Tries to send the json data to the address.
     # noinspection PyBroadException
     try:
-        sendData(clientSocket, jsonData)
+        sendData(clientSocket, packetToSend)
 
     except socket.timeout as inst:
         # If the request times out it, another attempt is made to resend the data.
@@ -206,7 +258,7 @@ for i in range(len(recipientList)):
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToSend)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -221,7 +273,7 @@ for i in range(len(recipientList)):
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToSend)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -241,7 +293,7 @@ for i in range(len(recipientList)):
         receiveData(clientSocket, "recipient_public_key")
     except socket.timeout as inst:
         # If the request times out it, another attempt is made to receive the key.
-        print("Request timed out - resending data.")
+        print("Request timed out - receiving data again.")
 
         # Tries to receive data again.
         # noinspection PyBroadException
@@ -269,17 +321,14 @@ for i in range(len(recipientList)):
             continue
 
     # Sending a request for the recipient username.
-    print("Requesting recipient username.")
+    print("Requesting recipient username...")
 
     packetToSend = {"type": "request_username"}
-
-    # Dumps the packet to be sent into a json object.
-    jsonData = json.dumps(packetToSend)
 
     # Tries to send the request to the address.
     # noinspection PyBroadException
     try:
-        sendData(clientSocket, jsonData)
+        sendData(clientSocket, packetToSend)
 
     except socket.timeout as inst:
         # If the request times out it, another attempt is made to resend the data.
@@ -288,7 +337,7 @@ for i in range(len(recipientList)):
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToSend)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -303,7 +352,7 @@ for i in range(len(recipientList)):
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToSend)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -313,7 +362,7 @@ for i in range(len(recipientList)):
 
     except Exception:
         # Cannot send IP to current IP, informs user, closes socket and moves onto next IP.
-        print("Unknown error occurred, moving on to next IP address\n\n")
+        print("Unknown error occurred, moving on to next IP address.\n\n")
         clientSocket.close()
         continue
 
@@ -351,7 +400,7 @@ for i in range(len(recipientList)):
             clientSocket.close()
             continue
 
-    print("Recipient username is: " + recipientUsername)
+    print("Recipient username is: " + recipientName)
 
     # Sending the greeting message.
     # Checks time for correct greeting of Good Morning, Good Afternoon or Good Evening
@@ -362,7 +411,7 @@ for i in range(len(recipientList)):
     else:
         greeting = "Good Evening "
 
-    message = "\n-----\n" + greeting + recipientUsername + ".\n" + customMessage + "\n\nFrom: " + localUsername + \
+    message = "\n-----\n" + greeting + recipientName + ".\n" + customMessage + "\n\nFrom: " + localUser + \
               "\n-----\n"
 
     print("Sending Message: \n", message + "\n")
@@ -372,23 +421,21 @@ for i in range(len(recipientList)):
     message = base64.b64encode(message)
     message = str(message, "latin-1")
 
-    # Dumps the packet to be sent into a json object.
     packetToSend = {"type": "message", "content": message}
-    jsonData = json.dumps(packetToSend)
 
     # Tries to send the json greeting to the address.
     # noinspection PyBroadException
     try:
-        sendData(clientSocket, jsonData)
+        sendData(clientSocket, packetToSend)
 
     except socket.timeout as inst:
         # If the request times out it, another attempt is made to resend the data.
-        print("Request timed out - retrying to receive data.")
+        print("Request timed out - resending data.")
 
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToSend)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -403,7 +450,7 @@ for i in range(len(recipientList)):
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToSend)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -421,6 +468,7 @@ for i in range(len(recipientList)):
     # noinspection PyBroadException
     try:
         receiveData(clientSocket, "message")
+
     except socket.timeout as inst:
         # If the request times out it, another attempt is made to receive the username.
         # print("Request timed out - retrying to receive data.")
@@ -454,22 +502,19 @@ for i in range(len(recipientList)):
 
     packetToBeSent = {"type": "fin"}
 
-    # Dumps the packet to be sent into a json object.
-    jsonData = json.dumps(packetToBeSent)
-
     # Tries to send the request to the address.
     # noinspection PyBroadException
     try:
-        sendData(clientSocket, jsonData)
+        sendData(clientSocket, packetToBeSent)
 
     except socket.timeout as inst:
         # If the request times out it, another attempt is made to resend the data.
-        print("Request timed out - retrying to receive data.")
+        print("Request timed out - resending data.")
 
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToBeSent)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
@@ -484,7 +529,7 @@ for i in range(len(recipientList)):
         # Tries to send the json data to the address again.
         # noinspection PyBroadException
         try:
-            sendData(clientSocket, jsonData)
+            sendData(clientSocket, packetToBeSent)
 
         except Exception:
             # Connection cannot be made with the current IP, informs user, closes socket and moves onto next IP.
